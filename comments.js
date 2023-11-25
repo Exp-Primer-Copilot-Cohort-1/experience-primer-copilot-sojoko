@@ -1,62 +1,63 @@
-// create web server
-var express = require('express');
-var app = express();
-var fs = require('fs');
-var bodyParser = require('body-parser');
-var urlencodedParser = bodyParser.urlencoded({ extended: false });
+// Create web server with express
+const express = require('express');
+const bodyParser = require('body-parser');
+const axios = require('axios');
+const cors = require('cors');
+const app = express();
 
-// set the view engine to ejs
-app.set('view engine', 'ejs');
+// Use body-parser middleware
+app.use(bodyParser.json());
+app.use(cors());
 
-// set the static files location /public/img will be /img for users
-app.use(express.static(__dirname + '/public'));
+// Create comments object
+const commentsByPostId = {};
 
-// use res.render to load up an ejs view file
+// Handle event from event-bus
+app.post('/events', async (req, res) => {
+  const { type, data } = req.body;
 
-// index page
-app.get('/', function (req, res) {
-	res.render('pages/index');
+  if (type === 'CommentCreated') {
+    const { id, content, postId, status } = data;
+
+    // Add new comment to comments object
+    const comments = commentsByPostId[postId] || [];
+    comments.push({ id, content, status });
+    commentsByPostId[postId] = comments;
+
+    // Send event to event-bus
+    await axios.post('http://event-bus-srv:4005/events', {
+      type: 'CommentModerated',
+      data: { id, content, postId, status },
+    });
+  }
+
+  if (type === 'CommentUpdated') {
+    const { id, content, postId, status } = data;
+
+    // Find comment in comments object
+    const comments = commentsByPostId[postId];
+    const comment = comments.find((comment) => comment.id === id);
+
+    // Update comment status
+    comment.status = status;
+
+    // Send event to event-bus
+    await axios.post('http://event-bus-srv:4005/events', {
+      type: 'CommentUpdated',
+      data: { id, content, postId, status },
+    });
+  }
+
+  res.send({});
 });
 
-// about page 
-app.get('/about', function (req, res) {
-	res.render('pages/about');
+// Get comments by post id
+app.get('/posts/:id/comments', (req, res) => {
+  const comments = commentsByPostId[req.params.id] || [];
+  res.send(comments);
 });
 
-// contact page 
-app.get('/contact', function (req, res) {
-	res.render('pages/contact');
+// Listen on port 4001
+app.listen(4001, () => {
+  console.log('Listening on port 4001');
 });
-
-// add comment
-app.post('/contact', urlencodedParser, function (req, res) {
-	if (!req.body) return res.sendStatus(400);
-	var comment = req.body;
-	//console.log(comment);
-	fs.appendFile('comments.txt', JSON.stringify(comment) + '\n', function (err) {
-		if (err) {
-			console.log(err);
-			res.sendStatus(500);
-		} else {
-			res.redirect('/comments');
-		}
-	});
-});
-
-// show comments
-app.get('/comments', function (req, res) {
-	fs.readFile('comments.txt', function (err, data) {
-		if (err) {
-			console.log(err);
-			res.sendStatus(500);
-		} else {
-			//console.log(data.toString());
-			//res.send(data.toString());
-			var comments = data.toString().split('\n');
-			res.render('pages/comments', { comments: comments });
-		}
-	});
-});
-
-app.listen(8080);
-console.log('8080 is the magic port');
